@@ -122,9 +122,11 @@ func SetIgnoreUnknown(v bool) {
 }
 
 type Migration struct {
-	Id   string
-	Up   []string
-	Down []string
+	Id        string
+	Up        []string
+	UpAfter   func(SqlExecutor) error
+	Down      []string
+	DownAfter func(SqlExecutor) error
 
 	DisableTransactionUp   bool
 	DisableTransactionDown bool
@@ -165,6 +167,7 @@ type PlannedMigration struct {
 
 	DisableTransaction bool
 	Queries            []string
+	After              func(SqlExecutor) error
 }
 
 type byId []*Migration
@@ -421,6 +424,8 @@ type SqlExecutor interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	Insert(list ...interface{}) error
 	Delete(list ...interface{}) (int64, error)
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
 }
 
 // Execute a set of migrations
@@ -475,6 +480,12 @@ func (ms MigrationSet) ExecMax(db *sql.DB, dialect string, m MigrationSource, di
 					_ = trans.Rollback()
 				}
 
+				return applied, newTxError(migration, err)
+			}
+		}
+
+		if migration.After != nil {
+			if err := migration.After(executor); err != nil {
 				return applied, newTxError(migration, err)
 			}
 		}
@@ -590,12 +601,14 @@ func (ms MigrationSet) PlanMigration(db *sql.DB, dialect string, m MigrationSour
 			result = append(result, &PlannedMigration{
 				Migration:          v,
 				Queries:            v.Up,
+				After:              v.UpAfter,
 				DisableTransaction: v.DisableTransactionUp,
 			})
 		} else if dir == Down {
 			result = append(result, &PlannedMigration{
 				Migration:          v,
 				Queries:            v.Down,
+				After:              v.DownAfter,
 				DisableTransaction: v.DisableTransactionDown,
 			})
 		}

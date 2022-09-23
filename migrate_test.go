@@ -59,6 +59,50 @@ func (s *SqliteMigrateSuite) TestRunMigration(c *C) {
 	c.Assert(n, Equals, 0)
 }
 
+func (s *SqliteMigrateSuite) TestRunMigrationWithAfter(c *C) {
+	migrations := &MemoryMigrationSource{
+		Migrations: []*Migration{
+			{
+				Id: "id1",
+				UpAfter: func(e SqlExecutor) error {
+					if _, err := e.Exec("CREATE TABLE foo(a int)"); err != nil {
+						return err
+					}
+					if _, err := e.Exec("INSERT INTO foo(a) VALUES (2)"); err != nil {
+						return err
+					}
+					return nil
+				},
+			},
+			{
+				Id: "id2",
+				DownAfter: func(e SqlExecutor) error {
+					if _, err := e.Exec("DELETE FROM foo"); err != nil {
+						return err
+					}
+					return nil
+				},
+			},
+		},
+	}
+
+	n, err := Exec(s.Db, "sqlite3", migrations, Up)
+	c.Assert(err, IsNil)
+	c.Assert(n, Equals, 2)
+
+	v, err := s.DbMap.SelectInt("SELECT * FROM foo")
+	c.Assert(err, IsNil)
+	c.Assert(int(v), Equals, 2)
+
+	n, err = ExecMax(s.Db, "sqlite3", migrations, Down, 1)
+	c.Assert(err, IsNil)
+	c.Assert(n, Equals, 1)
+
+	v, err = s.DbMap.SelectInt("SELECT COUNT(*) FROM foo")
+	c.Assert(err, IsNil)
+	c.Assert(int(v), Equals, 0)
+}
+
 func (s *SqliteMigrateSuite) TestRunMigrationEscapeTable(c *C) {
 	migrations := &MemoryMigrationSource{
 		Migrations: sqliteMigrations[:1],
